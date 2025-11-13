@@ -1,0 +1,7 @@
+[package]
+name    = "dondon"
+edition = "2024"
+
+[dependencies]
+cpal    = "0.16.0"
+

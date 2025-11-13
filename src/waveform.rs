@@ -1,6 +1,7 @@
 use std::f32::consts;
 
 
+#[expect(dead_code)]
 pub enum Waveform {
     Sine,
     Square,

@@ -19,6 +19,13 @@ impl From<Note> for Oscillator {
 }
 
 impl Oscillator {
+    pub fn from_frequency(frequency: f32) -> Self {
+        let shape = Waveform::Sine;
+        let phase = 0.0;
+
+        Self { shape, phase, frequency }
+    }
+
     #[inline]
     pub fn render(&mut self, sample_rate: f32) -> f32 {
         let sample = self.shape.sample(self.phase);

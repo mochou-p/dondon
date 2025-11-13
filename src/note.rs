@@ -1,12 +1,61 @@
+#[expect(dead_code)]
 pub enum Note {
-    A4
+    C (u8),
+    Cs(u8),
+    Db(u8),
+    D (u8),
+    Ds(u8),
+    Eb(u8),
+    E (u8),
+    F (u8),
+    Fs(u8),
+    Gb(u8),
+    G (u8),
+    Gs(u8),
+    Ab(u8),
+    A (u8),
+    As(u8),
+    Bb(u8),
+    B (u8)
 }
 
 impl Note {
-    pub fn frequency(&self) -> f32 {
+    fn octave_zero_frequency(&self) -> f32 {
         match self {
-            Self::A4 => 440.0
+            Self::C (_)               => 16.35160,
+            Self::Cs(_) | Self::Db(_) => 17.32391,
+            Self::D (_)               => 18.35405,
+            Self::Ds(_) | Self::Eb(_) => 19.44544,
+            Self::E (_)               => 20.60172,
+            Self::F (_)               => 21.82676,
+            Self::Fs(_) | Self::Gb(_) => 23.12465,
+            Self::G (_)               => 24.49971,
+            Self::Gs(_) | Self::Ab(_) => 25.95654,
+            Self::A (_)               => 27.50000,
+            Self::As(_) | Self::Bb(_) => 29.13524,
+            Self::B (_)               => 30.86771
         }
+    }
+
+    fn octave_number(&self) -> u8 {
+        *match self {
+            Self::C (octave)                    => octave,
+            Self::Cs(octave) | Self::Db(octave) => octave,
+            Self::D (octave)                    => octave,
+            Self::Ds(octave) | Self::Eb(octave) => octave,
+            Self::E (octave)                    => octave,
+            Self::F (octave)                    => octave,
+            Self::Fs(octave) | Self::Gb(octave) => octave,
+            Self::G (octave)                    => octave,
+            Self::Gs(octave) | Self::Ab(octave) => octave,
+            Self::A (octave)                    => octave,
+            Self::As(octave) | Self::Bb(octave) => octave,
+            Self::B (octave)                    => octave
+        }
+    }
+
+    pub fn frequency(&self) -> f32 {
+        self.octave_zero_frequency() * 2.0_f32.powf(self.octave_number() as f32)
     }
 }
 

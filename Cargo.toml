@@ -1,8 +1,29 @@
 [package]
-name    = "dondon"
-edition = "2024"
+publish      = false
+name         = "dondon"
+edition      = "2024"
+rust-version = "1.91.0"
+authors      = ["mochou-p"]
+description  = "dondon"
+readme       = "README.md"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/mochou-p/dondon"
 
 [dependencies]
-cpal    = "0.16.0"
-nannou  = "0.19.0"
+cpal         = "0.16.0"
+nannou       = "0.19.0"
+
+[lints.clippy]
+all          = { level = "warn", priority = -1 }
+pedantic     = { level = "warn", priority = -1 }
+nursery      = { level = "warn", priority = -1 }
+cargo        = { level = "warn", priority = -1 }
+
+# -all:
+excessive_precision     = "allow"
+# -pedantic:
+cast_precision_loss     = "allow"
+needless_pass_by_value  = "allow"
+# -cargo:
+multiple_crate_versions = "allow"
 

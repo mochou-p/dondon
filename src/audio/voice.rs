@@ -35,7 +35,7 @@ impl Voice {
 
     #[inline]
     fn pan_gains(&self) -> (f32, f32) {
-        let constant_power_pan = (self.pan * 0.5 + 0.5) * 0.5 * consts::PI;
+        let constant_power_pan = self.pan.mul_add(0.5, 0.5) * 0.5 * consts::PI;
 
         let left  = constant_power_pan.cos() * self.amplitude;
         let right = constant_power_pan.sin() * self.amplitude;

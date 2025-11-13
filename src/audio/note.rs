@@ -35,14 +35,14 @@ impl NotesToUiVoices for Vec<Note> {
 impl NotesToAudioVoices for Vec<Note> {
     fn to_audio_voices(&self) -> Vec<Voice> {
         self.iter()
-            .map(|note|       Oscillator::from(note))
-            .map(|oscillator|      Voice::from(oscillator))
+            .map(Oscillator::from)
+            .map(Voice::from)
             .collect()
     }
 }
 
 impl Note {
-    fn octave_zero_frequency(&self) -> f32 {
+    const fn octave_zero_frequency(&self) -> f32 {
         match self {
             Self::C (_)               => 16.35160,
             Self::Cs(_) | Self::Db(_) => 17.32391,
@@ -59,25 +59,30 @@ impl Note {
         }
     }
 
-    fn octave_number(&self) -> u8 {
-        *match self {
-            Self::C (octave)                    => octave,
-            Self::Cs(octave) | Self::Db(octave) => octave,
-            Self::D (octave)                    => octave,
-            Self::Ds(octave) | Self::Eb(octave) => octave,
-            Self::E (octave)                    => octave,
-            Self::F (octave)                    => octave,
-            Self::Fs(octave) | Self::Gb(octave) => octave,
-            Self::G (octave)                    => octave,
-            Self::Gs(octave) | Self::Ab(octave) => octave,
-            Self::A (octave)                    => octave,
-            Self::As(octave) | Self::Bb(octave) => octave,
-            Self::B (octave)                    => octave
+    const fn octave_number(&self) -> u8 {
+        match self {
+            Self::C (octave) |
+            Self::Cs(octave) |
+            Self::Db(octave) |
+            Self::D (octave) |
+            Self::Ds(octave) |
+            Self::Eb(octave) |
+            Self::E (octave) |
+            Self::F (octave) |
+            Self::Fs(octave) |
+            Self::Gb(octave) |
+            Self::G (octave) |
+            Self::Gs(octave) |
+            Self::Ab(octave) |
+            Self::A (octave) |
+            Self::As(octave) |
+            Self::Bb(octave) |
+            Self::B (octave) => *octave
         }
     }
 
     pub fn frequency(&self) -> f32 {
-        self.octave_zero_frequency() * 2.0_f32.powf(self.octave_number() as f32)
+        self.octave_zero_frequency() * f32::from(self.octave_number()).exp2()
     }
 }
 

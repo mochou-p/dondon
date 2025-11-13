@@ -15,11 +15,11 @@ pub use {note::Note, traits::NotesToAudioVoices, voice::Voice};
 
 
 pub fn spawn_thread(voices_mutex: Arc<Mutex<Vec<Voice>>>) {
+    const ASSUMED_SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
+
     let host      = cpal::default_host();
     let device    = host.default_output_device().unwrap();
     let supported = device.default_output_config().unwrap();
-
-    const ASSUMED_SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
     let sample_format = supported.sample_format();
 

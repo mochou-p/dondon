@@ -19,7 +19,7 @@ impl From<&Note> for Oscillator {
 }
 
 impl Oscillator {
-    pub fn from_frequency(frequency: f32) -> Self {
+    pub const fn from_frequency(frequency: f32) -> Self {
         let shape = Waveform::Sine;
         let phase = 0.0;
 

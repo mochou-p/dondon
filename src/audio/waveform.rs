@@ -18,10 +18,10 @@ impl Waveform {
                 radians.sin()
             },
             Self::Square => {
-                phase.round() * 2.0 - 1.0
+                phase.round().mul_add(2.0, -1.0)
             },
             Self::Sawtooth => {
-                phase * 2.0 - 1.0
+                phase.mul_add(2.0, -1.0)
             }
         }
     }

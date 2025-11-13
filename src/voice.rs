@@ -1,21 +1,29 @@
+use std::f32::consts;
+
 use super::oscillator::Oscillator;
 use super::note::Note;
 
 use crate::State;
 
 
-const DEFAULT_AMPLITUDE: f32 = 0.1;
+const DEFAULT_AMPLITUDE: f32   = 0.1;
+const DEFAULT_PAN:       f32   = 1.0;
+
+const      LEFT_CHANNEL: usize = 0;
+const     RIGHT_CHANNEL: usize = 1;
 
 pub struct Voice {
     oscillator: Oscillator,
-    amplitude:  f32
+    amplitude:  f32,
+    pan:        f32
 }
 
 impl From<Oscillator> for Voice {
     fn from(oscillator: Oscillator) -> Self {
         let amplitude = DEFAULT_AMPLITUDE;
+        let pan       = DEFAULT_PAN;
 
-        Self { oscillator, amplitude }
+        Self { oscillator, amplitude, pan }
     }
 }
 
@@ -36,14 +44,24 @@ impl Voice {
     }
 
     #[inline]
+    fn pan_gains(&self) -> (f32, f32) {
+        let constant_power_pan = (self.pan * 0.5 + 0.5) * 0.5 * consts::PI;
+
+        let left  = constant_power_pan.cos() * self.amplitude;
+        let right = constant_power_pan.sin() * self.amplitude;
+
+        (left, right)
+    }
+
+    #[inline]
     pub fn render_and_mix(&mut self, data: &mut [f32], state: &State) {
         for frame in data.chunks_mut(state.channels) {
-            let raw_value    = self.oscillator.render(state.sample_rate);
-            let sample       = raw_value * self.amplitude;
+            let sample = self.oscillator.render(state.sample_rate);
 
-            for sample_in_frame in frame.iter_mut() {
-                *sample_in_frame += sample;
-            }
+            let (left_gain, right_gain) = self.pan_gains();
+
+            frame[ LEFT_CHANNEL] += sample *  left_gain;
+            frame[RIGHT_CHANNEL] += sample * right_gain;
         }
     }
 }

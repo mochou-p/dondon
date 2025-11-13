@@ -51,7 +51,7 @@ impl App {
 
         let stream = self.device.build_output_stream(
             &config,
-            move |data: &mut [f32], _| {
+            move |data, _| {
                 Self::data_callback(data, &state, &mut voices);
             },
             Self::error_callback,

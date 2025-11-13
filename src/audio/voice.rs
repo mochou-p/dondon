@@ -1,9 +1,7 @@
 use std::f32::consts;
 
+use super::State;
 use super::oscillator::Oscillator;
-use super::note::Note;
-
-use crate::State;
 
 
 const DEFAULT_AMPLITUDE: f32   = 0.1;
@@ -24,14 +22,6 @@ impl From<Oscillator> for Voice {
         let pan       = DEFAULT_PAN;
 
         Self { oscillator, amplitude, pan }
-    }
-}
-
-impl From<Note> for Voice {
-    fn from(note: Note) -> Self {
-        let oscillator = Oscillator::from(note);
-
-        Self::from(oscillator)
     }
 }
 

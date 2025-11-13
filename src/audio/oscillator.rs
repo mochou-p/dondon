@@ -8,8 +8,8 @@ pub struct Oscillator {
     frequency: f32
 }
 
-impl From<Note> for Oscillator {
-    fn from(note: Note) -> Self {
+impl From<&Note> for Oscillator {
+    fn from(note: &Note) -> Self {
         let shape     = Waveform::Sine;
         let phase     = 0.0;
         let frequency = note.frequency();

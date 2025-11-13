@@ -1,3 +1,10 @@
+use super::oscillator::Oscillator;
+use super::traits::NotesToAudioVoices;
+use super::voice::Voice;
+
+use crate::ui::{self, NotesToUiVoices};
+
+
 #[expect(dead_code)]
 pub enum Note {
     C (u8),
@@ -17,6 +24,21 @@ pub enum Note {
     As(u8),
     Bb(u8),
     B (u8)
+}
+
+impl NotesToUiVoices for Vec<Note> {
+    fn to_ui_voices(&self) -> Vec<ui::Voice> {
+        vec![]
+    }
+}
+
+impl NotesToAudioVoices for Vec<Note> {
+    fn to_audio_voices(&self) -> Vec<Voice> {
+        self.iter()
+            .map(|note|       Oscillator::from(note))
+            .map(|oscillator|      Voice::from(oscillator))
+            .collect()
+    }
 }
 
 impl Note {

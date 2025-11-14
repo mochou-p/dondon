@@ -27,8 +27,10 @@ pub enum Note {
 }
 
 impl NotesToUiVoices for Vec<Note> {
-    fn to_ui_voices(&self) -> Vec<ui::Voice> {
-        vec![]
+    fn to_ui_voices(self) -> Vec<ui::Voice> {
+        self.into_iter()
+            .map(ui::Voice::from)
+            .collect()
     }
 }
 
@@ -42,6 +44,23 @@ impl NotesToAudioVoices for Vec<Note> {
 }
 
 impl Note {
+    const fn nth_in_octave(&self) -> u8 {
+        match self {
+            Self::C (_)               => 0,
+            Self::Cs(_) | Self::Db(_) => 1,
+            Self::D (_)               => 2,
+            Self::Ds(_) | Self::Eb(_) => 3,
+            Self::E (_)               => 4,
+            Self::F (_)               => 5,
+            Self::Fs(_) | Self::Gb(_) => 6,
+            Self::G (_)               => 7,
+            Self::Gs(_) | Self::Ab(_) => 8,
+            Self::A (_)               => 9,
+            Self::As(_) | Self::Bb(_) => 10,
+            Self::B (_)               => 11
+        }
+    }
+
     const fn octave_zero_frequency(&self) -> f32 {
         match self {
             Self::C (_)               => 16.35160,
@@ -83,6 +102,10 @@ impl Note {
 
     pub fn frequency(&self) -> f32 {
         self.octave_zero_frequency() * f32::from(self.octave_number()).exp2()
+    }
+
+    pub const fn ui_row(&self) -> u8 {
+        self.nth_in_octave() + 12 * self.octave_number()
     }
 }
 

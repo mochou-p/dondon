@@ -51,7 +51,7 @@ pub fn spawn_thread(voices_mutex: Arc<Mutex<Vec<Voice>>>) {
         ).unwrap();
 
         stream.play().unwrap();
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(2));
         stream.pause().unwrap();
     });
 }

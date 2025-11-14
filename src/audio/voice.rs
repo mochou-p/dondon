@@ -5,7 +5,7 @@ use super::oscillator::Oscillator;
 
 
 const DEFAULT_AMPLITUDE: f32   = 0.1;
-const DEFAULT_PAN:       f32   = 1.0;
+const DEFAULT_PAN:       f32   = 0.0;
 
 const      LEFT_CHANNEL: usize = 0;
 const     RIGHT_CHANNEL: usize = 1;

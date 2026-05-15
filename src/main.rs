@@ -1,11 +1,10 @@
-mod audio;
-mod ui;
+// mochou-p/dondon/src/main.rs
+
+mod init;
+mod utils;
 
 
 fn main() {
-    nannou::app(ui::model)
-        .event(ui::event)
-        .simple_window(ui::view)
-        .run();
+    let Some((host, device, config)) = init::setup() else { return; };
 }
 

@@ -1,3 +1,5 @@
+# mochou-p/dondon/.gitignore
+
 target/
 *.txt
 Cargo.lock

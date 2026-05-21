@@ -1,3 +1,5 @@
+# mochou-p/dondon/Cargo.toml
+
 [package]
 publish      = false
 name         = "dondon"
@@ -11,4 +13,5 @@ repository   = "https://github.com/mochou-p/dondon"
 
 [dependencies]
 cpal         = { version = "0.17.3", features = ["jack"] }
+eframe       = "0.34.2"
 

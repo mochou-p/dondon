@@ -1,25 +1,33 @@
 // mochou-p/dondon/src/main.rs
 
 mod audio;
+mod theme;
 mod ui;
 
 
 struct State {
-    stream: cpal::Stream,
-    ui:     ui::State
+    _stream: cpal::Stream,
+    ui:      ui::State
 }
 
 impl State {
     fn new() -> Self {
-        let stream = audio::stream();
-        let ui     = ui::State;
+        let (producer, consumer   ) = rtrb::RingBuffer::new(8);
+        let (_stream,  sample_rate) = audio::stream(consumer);
+        let  theme                  = theme::Theme::catppuccin_mocha();
+        let  ui                     = ui::State::new(producer, sample_rate, theme);
 
-        Self { stream, ui }
+        Self { _stream, ui }
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.ui.ui(ui);
     }
+}
+
+enum Command {
+    Resume,
+    Pause
 }
 
 fn main() {

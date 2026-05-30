@@ -2,49 +2,55 @@
 
 use std::sync::atomic::Ordering;
 use std::ops::Range;
+use cpal::platform::Stream;
+use cpal::traits::StreamTrait;
 use eframe::egui;
+use eframe::Frame;
 use egui::{Align2, FontId, Key, Painter, Rangef, ScrollArea, Stroke, StrokeKind, Panel, Rect, Sense, Ui, pos2, vec2};
 use rtrb::Producer;
-use crate::Command;
-use crate::audio::CLOCK;
+use crate::audio::{UiCommand, CLOCK};
 use crate::theme::Theme;
 
 
-pub struct State {
-    producer:    Producer<Command>,
-    sample_rate: f32,
-    theme:       Theme,
-    playing:     bool
+struct State {
+    audio_producer: Producer<UiCommand>,
+    sample_rate:    f32,
+    theme:          Theme,
+    playing:        bool
 }
 
 impl State {
-    pub fn new(producer: Producer<Command>, sample_rate: f32, theme: Theme) -> Self {
-        Self { producer, sample_rate, theme, playing: false }
+    fn new(audio_producer: Producer<UiCommand>, sample_rate: f32) -> Self {
+        Self { audio_producer, sample_rate, theme: Theme::catppuccin_mocha(), playing: false }
+    }
+
+    fn callback(mut self) -> impl FnMut(&mut Ui, &mut Frame) {
+        move |ui, _| {
+            ui.ctx().input(|input| {
+                if input.key_pressed(Key::Space) {
+                    self.play_or_stop();
+                }
+            });
+
+            if self.playing {
+                ui.ctx().request_repaint();
+            }
+
+            self.menu(ui);
+            self.piano_roll(ui);
+        }
     }
 
     fn play_or_stop(&mut self) {
-        if self.playing {
-            self.producer.push(Command::Pause ).unwrap();
-        } else {
-            self.producer.push(Command::Resume).unwrap();
-        }
+        self.audio_producer.push(
+            if self.playing {
+                UiCommand::Pause
+            } else {
+                UiCommand::Resume
+            }
+        ).unwrap();
 
         self.playing = !self.playing;
-    }
-
-    pub fn ui(&mut self, ui: &mut Ui) {
-        ui.ctx().input(|input| {
-            if input.key_pressed(Key::Space) {
-                self.play_or_stop();
-            }
-        });
-
-        if self.playing {
-            ui.ctx().request_repaint();
-        }
-
-        self.menu(ui);
-        self.piano_roll(ui);
     }
 
     fn menu(&mut self, ui: &mut Ui) {
@@ -124,15 +130,20 @@ impl State {
         {
             let     width_per_second = 64.0;
             let mut x                = rect.min.x + white_width;
+            let mut i                = 0;
 
             while x <= screen_width {
                 painter.vline(
                     x,
                     Rangef::new(rect.min.y, rect.min.y + full_height), // NOTE: can be floating
-                    Stroke::new(1.0f32, self.theme.piano_roll.outline)
+                    Stroke::new(
+                        0.25f32 + 0.75 * (i % 4 == 0) as i32 as f32 + (i % 16 == 0) as i32 as f32,
+                        self.theme.piano_roll.outline
+                    )
                 );
 
-                x += width_per_second;
+                x += width_per_second * 0.25;
+                i += 1;
             }
         }
     }
@@ -293,5 +304,16 @@ impl State {
             );
         }
     }
+}
+
+pub fn run(stream: Stream, audio_producer: Producer<UiCommand>, sample_rate: f32) {
+    let title   = std::env!("CARGO_BIN_NAME");
+    let options = eframe::NativeOptions::default();
+
+    let state   = State::new(audio_producer, sample_rate);
+
+    stream.play().unwrap();
+    eframe::run_ui_native(title, options, state.callback()).unwrap();
+    stream.pause().unwrap();
 }
 

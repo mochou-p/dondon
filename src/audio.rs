@@ -4,89 +4,143 @@ use std::f32::consts;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use cpal::{OutputCallbackInfo, SampleFormat, SupportedStreamConfig};
 use cpal::platform::{Stream, default_host};
-use cpal::traits::{DeviceTrait, HostTrait};
-use rtrb::Consumer;
-use crate::Command;
+use cpal::traits::{DeviceTrait as _, HostTrait as _};
+use rtrb::{RingBuffer, Producer, Consumer};
 
 
 pub static PLAYING: AtomicBool = AtomicBool::new(false);
 pub static CLOCK:   AtomicU64  = AtomicU64 ::new(    0);
 
-pub struct State {
-    consumer:    Consumer<Command>,
-    voices:      [Voice; 2],
-    sample_rate: f32,
-    playing:     bool
+const VOICE_COUNT: usize = 8;
+
+pub enum UiCommand {
+    Resume,
+    Pause
+}
+
+pub enum SchedulerCommand {
+    PlayNote { start: f32, end: f32, amplitude: f32, frequency: f32 }
+}
+
+struct State {
+    scheduler_consumer: Consumer<SchedulerCommand>,
+    ui_consumer:        Consumer<       UiCommand>,
+    voices:             [Voice; VOICE_COUNT],
+    sample_rate:        f32,
+    playing:            bool
 }
 
 impl State {
-    fn new(config: &SupportedStreamConfig, consumer: Consumer<Command>) -> Self {
+    fn new(
+        config:             &SupportedStreamConfig,
+        scheduler_consumer: Consumer<SchedulerCommand>,
+        ui_consumer:        Consumer<       UiCommand>
+    ) -> Self {
         assert_eq!(         config.channels(),      2                 );
         assert_eq!(         config.sample_format(), SampleFormat::F32 );
         assert   !(matches!(config.sample_rate(),   44_100 | 48_000  ));
 
-        let voices      = [Voice::new(440.0, 0.0, 2.0, Envelope::flat()), Voice::new(440.0, 4.0, 6.0, Envelope::default())];
+        let voices      = std::array::from_fn::<_, VOICE_COUNT, _>(|_| Voice::new());
         let sample_rate = config.sample_rate() as f32;
         let playing     = false;
 
-        Self { consumer, voices, sample_rate, playing }
+        Self { scheduler_consumer, ui_consumer, voices, sample_rate, playing }
     }
 
     fn callback(mut self) -> impl FnMut(&mut [f32], &OutputCallbackInfo) {
         move |data, _info| {
-            while let Ok(command) = self.consumer.pop() {
-                match command {
-                    Command::Resume => {
-                        self.playing = true;
-                        PLAYING.store(self.playing, Ordering::Relaxed);
-                    },
-                    Command::Pause => {
-                        self.playing = false;
-                        PLAYING.store(self.playing, Ordering::Relaxed);
+            self.process_commands();
+
+            if self.playing {
+                self.mix_voices(data);
+            }
+        }
+    }
+
+    fn process_commands(&mut self) {
+        self.process_ui_commands();
+        self.process_scheduler_commands();
+    }
+
+    fn process_ui_commands(&mut self) {
+        while let Ok(command) = self.ui_consumer.pop() {
+            match command {
+                UiCommand::Resume => {
+                    self.playing = true;
+                    PLAYING.store(self.playing, Ordering::Relaxed);
+                },
+                UiCommand::Pause => {
+                    self.playing = false;
+                    PLAYING.store(self.playing, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    fn process_scheduler_commands(&mut self) {
+        while let Ok(command) = self.scheduler_consumer.pop() {
+            match command {
+                SchedulerCommand::PlayNote { start, end, amplitude, frequency } => {
+                    for voice in self.voices.iter_mut() {
+                        if voice.asleep {
+                            voice.asleep    = false;
+                            voice.start     = start;
+                            voice.end       = end;
+                            voice.amplitude = amplitude;
+                            voice.frequency = frequency;
+
+                            // TODO: properly recalculate ADSR and phases
+                            voice.envelope.state = ADSR::Waiting;
+
+                            break;
+                        }
                     }
                 }
             }
+        }
+    }
 
-            if !self.playing {
-                return;
-            }
+    fn mix_voices(&mut self, data: &mut [f32]) {
+        for frame in unsafe { data.as_chunks_unchecked_mut::<2>() } {
+            frame[0] = 0.0;
+            frame[1] = 0.0;
 
-            for frame in unsafe { data.as_chunks_unchecked_mut::<2>() } {
-                frame[0] = 0.0;
-                frame[1] = 0.0;
+            let clock = CLOCK.fetch_add(1, Ordering::Relaxed);
+            let time  = clock as f32 / self.sample_rate;
 
-                let clock = CLOCK.fetch_add(1, Ordering::Relaxed);
-                let time  = clock as f32 / self.sample_rate;
-
-                for voice in self.voices.iter_mut() {
-                    voice. render(time, frame);
-                    voice.advance(self.sample_rate);
-                }
+            for voice in self.voices.iter_mut() {
+                voice. render(time, frame);
+                voice.advance(self.sample_rate);
             }
         }
     }
 }
 
-pub fn stream(consumer: Consumer<Command>) -> (Stream, f32) {
-    let host        = default_host();
-    let device      = host.default_output_device().unwrap();
-    let config      = device.default_output_config().unwrap();
+pub fn spawn() -> (Stream, Producer<SchedulerCommand>, Producer<UiCommand>, f32) {
+    let host   =        default_host();
+    let device = host  .default_output_device().unwrap();
+    let config = device.default_output_config().unwrap();
 
-    let state       = State::new(&config, consumer);
+    let (scheduler_producer, scheduler_consumer) = RingBuffer::new(8);
+    let (       ui_producer,        ui_consumer) = RingBuffer::new(8);
+
+    let state       = State::new(&config, scheduler_consumer, ui_consumer);
     let sample_rate = state.sample_rate;
 
-    let stream      = device.build_output_stream::<f32, _, _>(
+    let stream = device.build_output_stream::<f32, _, _>(
         &config.config(),
         state.callback(),
         |err| eprintln!("\x1b[31mstream error:\x1b[0m {err}"),
         None
     ).unwrap();
 
-    (stream, sample_rate)
+    (stream, scheduler_producer, ui_producer, sample_rate)
 }
 
 #[expect(dead_code)]
+#[derive(Default)]
 enum Waveform {
+    #[default]
     Sine,
     Square,
     Triangle,
@@ -111,7 +165,9 @@ impl Waveform {
     }
 }
 
+#[derive(Default)]
 enum ADSR {
+    #[default]
     Waiting,
     Attack(f32),
     Decay(f32),
@@ -121,11 +177,11 @@ enum ADSR {
 }
 
 struct Envelope {
-    state:    ADSR,
-    attack:   f32,
-    decay:    f32,
-    sustain:  f32,
-    release:  f32
+    state:   ADSR,
+    attack:  f32,
+    decay:   f32,
+    sustain: f32,
+    release: f32
 }
 
 fn from_to_over(from: f32, to: f32, over: f32, time: f32) -> f32 {
@@ -136,26 +192,16 @@ fn from_to_over(from: f32, to: f32, over: f32, time: f32) -> f32 {
 impl Default for Envelope {
     fn default() -> Self {
         Self {
-            state:   ADSR::Waiting,
+            state:   ADSR::default(),
             attack:  0.1,
             decay:   0.2,
-            sustain: 1.0,
+            sustain: 0.8,
             release: 0.1
         }
     }
 }
 
 impl Envelope {
-    fn flat() -> Self {
-        Self {
-            state:   ADSR::Waiting,
-            attack:  0.0,
-            decay:   0.0,
-            sustain: 1.0,
-            release: 0.0
-        }
-    }
-
     fn sample(&mut self, time: f32, end: f32) -> f32 {
         match self.state {
             ADSR::Waiting => {
@@ -208,6 +254,7 @@ impl Envelope {
 }
 
 struct Voice {
+    asleep:    bool,
     phase:     f32,
     frequency: f32,
     amplitude: f32,
@@ -219,25 +266,31 @@ struct Voice {
 }
 
 impl Voice {
-    fn new(frequency: f32, start: f32, end: f32, envelope: Envelope) -> Self {
+    fn new() -> Self {
         Self {
+            asleep:    true,
             phase:     0.0,
-            frequency,
-            amplitude: 0.4,
+            frequency: 0.0,
+            amplitude: 0.0,
             pan:       0.0,
-            shape:     Waveform::Sine,
-            envelope,
-            start,
-            end
+            shape:     Waveform::default(),
+            envelope:  Envelope::default(),
+            start:     f32::INFINITY,
+            end:       f32::INFINITY
         }
     }
 
     fn render(&mut self, time: f32, frame: &mut [f32]) {
-        if
-            (matches!(self.envelope.state, ADSR::Waiting) && time < self.start)
-            ||
-            matches!(self.envelope.state, ADSR::Finished)
-        {
+        if matches!(self.envelope.state, ADSR::Finished) {
+            self.asleep    = true;
+            self.phase     = 0.0;
+            self.start     = f32::INFINITY;
+            self.end       = f32::INFINITY;
+            self.amplitude = 0.0;
+            self.frequency = 0.0;
+        }
+
+        if self.asleep || (matches!(self.envelope.state, ADSR::Waiting) && time < self.start) {
             return;
         }
 
@@ -248,8 +301,8 @@ impl Voice {
         let      left_gain  = angle.cos().clamp(0.0, 1.0);
         let     right_gain  = angle.sin().clamp(0.0, 1.0);
 
-        frame[0]           += sample *  left_gain * gain;
-        frame[1]           += sample * right_gain * gain;
+        frame[0]           += sample * gain *  left_gain;
+        frame[1]           += sample * gain * right_gain;
     }
 
     fn advance(&mut self, sample_rate: f32) {

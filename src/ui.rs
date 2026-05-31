@@ -5,8 +5,8 @@ use std::ops::Range;
 use cpal::platform::Stream;
 use cpal::traits::StreamTrait;
 use eframe::egui;
-use eframe::{Frame, NativeOptions};
-use egui::{Align2, CentralPanel, FontId, Key, Painter, Rangef, ScrollArea, Stroke, StrokeKind, Panel, Rect, Sense, Ui, pos2, vec2};
+use eframe::NativeOptions;
+use egui::{Align2, CentralPanel, FontId, Frame, Key, Painter, PointerButton, Rangef, Response, ScrollArea, Stroke, StrokeKind, Panel, Rect, Sense, Ui, pos2, vec2};
 use egui::containers::scroll_area::{ScrollSource, ScrollBarVisibility};
 use rtrb::Producer;
 use crate::audio::{self, CLOCK};
@@ -43,7 +43,8 @@ struct State {
     sample_rate:        f32,
     theme:              Theme,
     playing:            bool,
-    notes:              Vec<Note>
+    notes:              Vec<Note>,
+    dragged_note:       Option<usize>
 }
 
 impl State {
@@ -55,10 +56,10 @@ impl State {
         let theme   = Theme::catppuccin_mocha();
         let playing = false;
 
-        Self { audio_producer, scheduler_producer, sample_rate, theme, playing, notes: vec![] }
+        Self { audio_producer, scheduler_producer, sample_rate, theme, playing, notes: vec![], dragged_note: None }
     }
 
-    fn callback(mut self) -> impl FnMut(&mut Ui, &mut Frame) {
+    fn callback(mut self) -> impl FnMut(&mut Ui, &mut eframe::Frame) {
         move |ui, _| {
             ui.ctx().input(|input| {
                 if input.key_pressed(Key::Space) {
@@ -100,45 +101,190 @@ impl State {
 
     fn piano_roll(&mut self, ui: &mut Ui) {
         CentralPanel::default()
+            .frame(Frame::default())
             .show_inside(ui, |ui| {
                 ScrollArea::both()
                     .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
                     .scroll_source(ScrollSource::MOUSE_WHEEL)
                     .show(ui, |ui| {
-                        let screen_width     = ui.viewport_rect().width();
-                        let   line_height    = 20.0;
-                        let   line_width     = line_height * 200.0;
-                        let   full_height    = line_height * 88.0;
-                        let  white_height    = (line_height * 12.0) / 7.0;
-                        let  white_width     = white_height * 2.0;
-                        let  black_height    = line_height;
-                        let  black_width     = black_height * 2.0;
+                        let screen_width  = ui.viewport_rect().width();
+                        let   line_height = 20.0;
+                        let   line_width  = line_height * 200.0;
+                        let   full_height = line_height * 88.0;
+                        let  white_height = (line_height * 12.0) / 7.0;
+                        let  white_width  = white_height * 2.0;
+                        let  black_height = line_height;
+                        let  black_width  = black_height * 2.0;
 
                         let (rect, response) = ui.allocate_exact_size(vec2(line_width, full_height), Sense::click_and_drag());
                         let  painter         = ui.painter().with_clip_rect(rect);
 
-                        if response.clicked() {
-                            let interaction = response.interact_pointer_pos().unwrap();
-                            let x           = interaction.x - rect.min.x - white_width;
-                            let y           = interaction.y - rect.min.y;
+                        self.piano_roll_input(&rect, &response, white_width, line_height);
 
-                            if x >= 0.0 && y >= 0.0 && y < full_height {
-                                let start = x / WIDTH_PER_SECOND;
-                                let key   = (y / line_height).floor();
-                                let note  = Note::new(start, key);
-
-                                self.scheduler_producer.push(note.to_command()).unwrap();
-                                self.notes.push(note);
-                            }
-                        }
-
-                        self.piano_roll_lines          (&painter, &rect, white_width, screen_width, line_height,     full_height);
-                        self.piano_roll_notes          (&painter, &rect, white_width,               line_height                 );
-                        self.piano_roll_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate            );
-                        self.piano_roll_white_key_block(&painter, &rect, white_width, full_height,  line_height                 );
-                        self.piano_roll_black_keys     (&painter, &rect, black_width, black_height, line_height                 );
+                        self.piano_roll_lines          (&painter, &rect, white_width, screen_width, line_height,      full_height);
+                        self.piano_roll_notes          (&painter, &rect, white_width,               line_height                  );
+                        self.piano_roll_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate             );
+                        self.piano_roll_white_key_block(&painter, &rect, white_width, full_height,  line_height                  );
+                        self.piano_roll_black_keys     (&painter, &rect, black_width, black_height, line_height                  );
                     });
             });
+    }
+
+    fn get_note_index(&self, finder: impl Fn(&Note) -> bool) -> Option<usize> {
+        for (i, note) in self.notes.iter().enumerate().rev() {
+            if finder(note) {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
+    fn get_note_indices(&self, finder: impl Fn(&Note) -> bool) -> Vec<usize> {
+        let mut indices = vec![];
+
+        for (i, note) in self.notes.iter().enumerate().rev() {
+            if finder(note) {
+                indices.push(i);
+            }
+        }
+
+        indices
+    }
+
+    fn hovered_note(x: f32, key: f32) -> impl Fn(&Note) -> bool {
+        move |note| x >= note.start && x < note.start + note.length && key.floor() == note.key
+    }
+
+    fn piano_roll_input(
+        &mut self,
+        rect:        &Rect,
+        response:    &Response,
+        white_width: f32,
+        line_height: f32
+    ) {
+        let Some((x, y)) = response
+            .interact_pointer_pos()
+            .map(| pos  | (pos.x - rect.min.x - white_width, pos.y - rect.min.y))
+            .map(|(x, y)| (x / WIDTH_PER_SECOND, y / line_height))
+        else {
+            return;
+        };
+
+        if x < 0.0 || y < 0.0 || y >= 88.0 { return; }
+
+        if self.piano_roll_input_click_primary         (response, x, y) { return; }
+        if self.piano_roll_input_click_secondary       (response, x, y) { return; }
+        if self.piano_roll_input_drag_started_primary  (response, x, y) { return; }
+        if self.piano_roll_input_drag_started_secondary(response, x, y) { return; }
+        if self.piano_roll_input_dragged_primary       (response, x, y) { return; }
+        if self.piano_roll_input_dragged_secondary     (response, x, y) { return; }
+        if self.piano_roll_input_drag_stopped_primary  (response      ) { return; }
+    }
+
+    fn piano_roll_input_click_primary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.clicked_by(PointerButton::Primary) {
+            let note = Note::new(x, y.floor());
+
+            self.scheduler_producer.push(note.to_command()).unwrap();
+            self.notes.push(note);
+            return true;
+        }
+
+        false
+    }
+
+    fn piano_roll_input_click_secondary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.clicked_by(PointerButton::Secondary) {
+            let indices = self.get_note_indices(Self::hovered_note(x, y));
+
+            for i in indices.iter() {
+                self.notes.remove(*i); // TODO: tell scheduler (remove)
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn piano_roll_input_drag_started_primary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.drag_started_by(PointerButton::Primary) {
+            if let Some(i) = self.get_note_index(Self::hovered_note(x, y)) {
+                // TODO: tell scheduler (remove)
+                self.dragged_note = Some(i);
+                return true;
+            }
+
+            let i = self.notes.len();
+
+            self.notes.push(Note::new(0.0, (y - 0.5).clamp(0.0, 87.0)));
+            // TODO: temp temp temp temp
+            self.notes[i].start = (x - DEFAULT_LENGTH * 0.5).max(0.0);
+
+            self.dragged_note = Some(i);
+            return true;
+        }
+
+        false
+    }
+
+    fn piano_roll_input_drag_started_secondary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.drag_started_by(PointerButton::Secondary) {
+            let indices = self.get_note_indices(Self::hovered_note(x, y));
+
+            for i in indices.iter() {
+                self.notes.remove(*i); // TODO: tell scheduler (remove)
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn piano_roll_input_dragged_primary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.dragged_by(PointerButton::Primary) {
+            if let Some(i) = self.dragged_note {
+                self.notes[i].start = x - self.notes[i].length * 0.5;
+                self.notes[i].key   = y - 0.5;
+            }
+        }
+
+        false
+    }
+
+    fn piano_roll_input_dragged_secondary(&mut self, response: &Response, x: f32, y: f32) -> bool {
+        if response.dragged_by(PointerButton::Secondary) {
+            let indices = self.get_note_indices(Self::hovered_note(x, y));
+
+            for i in indices.iter() {
+                self.notes.remove(*i); // TODO: tell scheduler (remove)
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn piano_roll_input_drag_stopped_primary(&mut self, response: &Response) -> bool {
+        if response.drag_stopped_by(PointerButton::Primary) {
+            if let Some(i) = self.dragged_note.take() {
+                let step  = 0.25;
+                let start = (self.notes[i].start / step).round() * step;
+                let key   = self.notes[i].key.round();
+
+                self.notes[i].start = start;
+                self.notes[i].key   = key;
+
+                // TODO: tell scheduler (new)
+            }
+
+            return true;
+        }
+
+        false
     }
 
     fn piano_roll_lines(

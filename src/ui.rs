@@ -119,13 +119,12 @@ impl State {
                         let (rect, response) = ui.allocate_exact_size(vec2(line_width, full_height), Sense::click_and_drag());
                         let  painter         = ui.painter().with_clip_rect(rect);
 
-                        self.piano_roll_input(&rect, &response, white_width, line_height);
-
-                        self.piano_roll_lines          (&painter, &rect, white_width, screen_width, line_height,      full_height);
-                        self.piano_roll_notes          (&painter, &rect, white_width,               line_height                  );
-                        self.piano_roll_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate             );
-                        self.piano_roll_white_key_block(&painter, &rect, white_width, full_height,  line_height                  );
-                        self.piano_roll_black_keys     (&painter, &rect, black_width, black_height, line_height                  );
+                        self.piano_roll_input(
+                            &rect, &response, white_width, line_height
+                        );
+                        self.piano_roll_draw(
+                            &painter, &rect, white_width, black_width, black_height, screen_width, full_height, line_height
+                        );
                     });
             });
     }
@@ -171,8 +170,6 @@ impl State {
             return;
         };
 
-        if x < 0.0 || y < 0.0 || y >= 88.0 { return; }
-
         if self.piano_roll_input_click_primary         (response, x, y) { return; }
         if self.piano_roll_input_click_secondary       (response, x, y) { return; }
         if self.piano_roll_input_drag_started_primary  (response, x, y) { return; }
@@ -184,6 +181,8 @@ impl State {
 
     fn piano_roll_input_click_primary(&mut self, response: &Response, x: f32, y: f32) -> bool {
         if response.clicked_by(PointerButton::Primary) {
+            if x < 0.0 || y < 0.0 || y >= 88.0 { return true; }
+
             let note = Note::new(x, y.floor());
 
             self.scheduler_producer.push(note.to_command()).unwrap();
@@ -196,6 +195,8 @@ impl State {
 
     fn piano_roll_input_click_secondary(&mut self, response: &Response, x: f32, y: f32) -> bool {
         if response.clicked_by(PointerButton::Secondary) {
+            if x < 0.0 || y < 0.0 || y >= 88.0 { return true; }
+
             let indices = self.get_note_indices(Self::hovered_note(x, y));
 
             for i in indices.iter() {
@@ -246,8 +247,8 @@ impl State {
     fn piano_roll_input_dragged_primary(&mut self, response: &Response, x: f32, y: f32) -> bool {
         if response.dragged_by(PointerButton::Primary) {
             if let Some(i) = self.dragged_note {
-                self.notes[i].start = x - self.notes[i].length * 0.5;
-                self.notes[i].key   = y - 0.5;
+                self.notes[i].start = (x - self.notes[i].length * 0.5).max(0.0);
+                self.notes[i].key   = (y - 0.5).clamp(0.0, 87.0);
             }
         }
 
@@ -287,7 +288,25 @@ impl State {
         false
     }
 
-    fn piano_roll_lines(
+    fn piano_roll_draw(
+        &self,
+        painter:      &Painter,
+        rect:         &Rect,
+        white_width:  f32,
+        black_width:  f32,
+        black_height: f32,
+        screen_width: f32,
+        full_height:  f32,
+        line_height:  f32
+    ) {
+        self.piano_roll_draw_lines          (&painter, &rect, white_width, screen_width, line_height,      full_height);
+        self.piano_roll_draw_notes          (&painter, &rect, white_width,               line_height                  );
+        self.piano_roll_draw_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate             );
+        self.piano_roll_draw_white_key_block(&painter, &rect, white_width, full_height,  line_height                  );
+        self.piano_roll_draw_black_keys     (&painter, &rect, black_width, black_height, line_height                  );
+    }
+
+    fn piano_roll_draw_lines(
         &self,
         painter:      &Painter,
         rect:         &Rect,
@@ -296,7 +315,7 @@ impl State {
         line_height:  f32,
         full_height:  f32
     ) {
-        self._piano_roll_lines(
+        self._piano_roll_draw_lines(
             painter,
             11..12,
             white_width,
@@ -308,7 +327,7 @@ impl State {
         let mut y_off = line_height;
 
         for _ in 0..7 {
-            self._piano_roll_lines(
+            self._piano_roll_draw_lines(
                 painter,
                 0..12,
                 white_width,
@@ -319,7 +338,7 @@ impl State {
             y_off += line_height * 12.0;
         }
 
-        self._piano_roll_lines(
+        self._piano_roll_draw_lines(
             painter,
             0..3,
             white_width,
@@ -348,7 +367,7 @@ impl State {
         }
     }
 
-    fn _piano_roll_lines(
+    fn _piano_roll_draw_lines(
         &self,
         painter: &Painter,
         range:   Range<i32>,
@@ -374,7 +393,7 @@ impl State {
         }
     }
 
-    fn piano_roll_notes(
+    fn piano_roll_draw_notes(
         &self,
         painter:     &Painter,
         rect:        &Rect,
@@ -396,7 +415,7 @@ impl State {
         }
     }
 
-    fn piano_roll_seek_bar(
+    fn piano_roll_draw_seek_bar(
         &self,
         painter:     &Painter,
         rect:        &Rect,
@@ -414,7 +433,7 @@ impl State {
         );
     }
 
-    fn piano_roll_white_key_block(
+    fn piano_roll_draw_white_key_block(
         &self,
         painter:     &Painter,
         rect:        &Rect,
@@ -470,7 +489,7 @@ impl State {
         );
     }
 
-    fn piano_roll_black_keys(
+    fn piano_roll_draw_black_keys(
         &self,
         painter:      &Painter,
         rect:         &Rect,
@@ -479,7 +498,7 @@ impl State {
         line_height:  f32
     ) {
         for i in 0..7 {
-            self._piano_roll_black_keys(
+            self._piano_roll_draw_black_keys(
                 painter,
                 0..6,
                 -black_height,
@@ -490,7 +509,7 @@ impl State {
             );
         }
 
-        self._piano_roll_black_keys(
+        self._piano_roll_draw_black_keys(
             painter,
             0..1,
             -black_height,
@@ -501,7 +520,7 @@ impl State {
         );
     }
 
-    fn _piano_roll_black_keys(
+    fn _piano_roll_draw_black_keys(
         &self,
         painter:     &Painter,
         range:       Range<i32>,

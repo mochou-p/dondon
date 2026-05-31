@@ -16,7 +16,8 @@ pub struct PianoRollTheme {
     pub white_key:      Color32,
     pub black_key:      Color32,
     pub seek_bar:       Color32,
-    pub c_key_text:     Color32
+    pub c_key_text:     Color32,
+    pub note:           Color32
 }
 
 impl Theme {
@@ -31,7 +32,8 @@ impl Theme {
                 white_key:      Color32::from_rgb(205, 214, 244),
                 black_key:      Color32::from_rgb( 24,  24,  37),
                 seek_bar:       Color32::from_rgb(137, 180, 250),
-                c_key_text:     Color32::from_rgb( 88,  91, 112)
+                c_key_text:     Color32::from_rgb( 88,  91, 112),
+                note:           Color32::from_rgb(203, 166, 247)
             }
         }
     }

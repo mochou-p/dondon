@@ -5,23 +5,57 @@ use std::ops::Range;
 use cpal::platform::Stream;
 use cpal::traits::StreamTrait;
 use eframe::egui;
-use eframe::Frame;
-use egui::{Align2, FontId, Key, Painter, Rangef, ScrollArea, Stroke, StrokeKind, Panel, Rect, Sense, Ui, pos2, vec2};
+use eframe::{Frame, NativeOptions};
+use egui::{Align2, CentralPanel, FontId, Key, Painter, Rangef, ScrollArea, Stroke, StrokeKind, Panel, Rect, Sense, Ui, pos2, vec2};
+use egui::containers::scroll_area::{ScrollSource, ScrollBarVisibility};
 use rtrb::Producer;
-use crate::audio::{UiCommand, CLOCK};
+use crate::audio::{self, CLOCK};
+use crate::scheduler;
 use crate::theme::Theme;
 
 
+const WIDTH_PER_SECOND: f32 = 64.0;
+const DEFAULT_LENGTH:   f32 =  1.0;
+
+struct Note {
+    start:  f32,
+    length: f32,
+    key:    f32
+}
+
+impl Note {
+    fn new(start: f32, key: f32) -> Self {
+        let step  = 0.25;
+        let start = (start / step).round() * step;
+
+        Self { start, length: DEFAULT_LENGTH, key }
+    }
+
+    fn to_command(&self) -> scheduler::UiCommand {
+        let frequency = 440.0 * 2.0f32.powf(((88.0 - self.key) - 49.0) / 12.0);
+        scheduler::UiCommand::NewNote { frequency, start: self.start, end: self.start + DEFAULT_LENGTH }
+    }
+}
+
 struct State {
-    audio_producer: Producer<UiCommand>,
-    sample_rate:    f32,
-    theme:          Theme,
-    playing:        bool
+    audio_producer:     Producer<    audio::UiCommand>,
+    scheduler_producer: Producer<scheduler::UiCommand>,
+    sample_rate:        f32,
+    theme:              Theme,
+    playing:            bool,
+    notes:              Vec<Note>
 }
 
 impl State {
-    fn new(audio_producer: Producer<UiCommand>, sample_rate: f32) -> Self {
-        Self { audio_producer, sample_rate, theme: Theme::catppuccin_mocha(), playing: false }
+    fn new(
+        audio_producer:     Producer<    audio::UiCommand>,
+        scheduler_producer: Producer<scheduler::UiCommand>,
+        sample_rate:        f32
+    ) -> Self {
+        let theme   = Theme::catppuccin_mocha();
+        let playing = false;
+
+        Self { audio_producer, scheduler_producer, sample_rate, theme, playing, notes: vec![] }
     }
 
     fn callback(mut self) -> impl FnMut(&mut Ui, &mut Frame) {
@@ -44,9 +78,9 @@ impl State {
     fn play_or_stop(&mut self) {
         self.audio_producer.push(
             if self.playing {
-                UiCommand::Pause
+                audio::UiCommand::Pause
             } else {
-                UiCommand::Resume
+                audio::UiCommand::Resume
             }
         ).unwrap();
 
@@ -64,25 +98,46 @@ impl State {
             });
     }
 
-    fn piano_roll(&self, ui: &mut Ui) {
-        ScrollArea::both()
-            .show(ui, |ui| {
-                let screen_width      = ui.viewport_rect().width();
-                let   line_height     = 20.0;
-                let   line_width      = line_height * 200.0;
-                let   full_height     = line_height * 88.0;
-                let  white_height     = (line_height * 12.0) / 7.0;
-                let  white_width      = white_height * 2.0;
-                let  black_height     = line_height;
-                let  black_width      = black_height * 2.0;
+    fn piano_roll(&mut self, ui: &mut Ui) {
+        CentralPanel::default()
+            .show_inside(ui, |ui| {
+                ScrollArea::both()
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                    .scroll_source(ScrollSource::MOUSE_WHEEL)
+                    .show(ui, |ui| {
+                        let screen_width     = ui.viewport_rect().width();
+                        let   line_height    = 20.0;
+                        let   line_width     = line_height * 200.0;
+                        let   full_height    = line_height * 88.0;
+                        let  white_height    = (line_height * 12.0) / 7.0;
+                        let  white_width     = white_height * 2.0;
+                        let  black_height    = line_height;
+                        let  black_width     = black_height * 2.0;
 
-                let (rect, _response) = ui.allocate_exact_size(vec2(line_width, full_height), Sense::empty());
-                let  painter          = ui.painter().with_clip_rect(rect);
+                        let (rect, response) = ui.allocate_exact_size(vec2(line_width, full_height), Sense::click_and_drag());
+                        let  painter         = ui.painter().with_clip_rect(rect);
 
-                self.piano_roll_lines          (&painter, &rect, white_width, screen_width, line_height,     full_height);
-                self.piano_roll_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate            );
-                self.piano_roll_white_key_block(&painter, &rect, white_width, full_height,  line_height                 );
-                self.piano_roll_black_keys     (&painter, &rect, black_width, black_height, line_height                 );
+                        if response.clicked() {
+                            let interaction = response.interact_pointer_pos().unwrap();
+                            let x           = interaction.x - rect.min.x - white_width;
+                            let y           = interaction.y - rect.min.y;
+
+                            if x >= 0.0 && y >= 0.0 && y < full_height {
+                                let start = x / WIDTH_PER_SECOND;
+                                let key   = (y / line_height).floor();
+                                let note  = Note::new(start, key);
+
+                                self.scheduler_producer.push(note.to_command()).unwrap();
+                                self.notes.push(note);
+                            }
+                        }
+
+                        self.piano_roll_lines          (&painter, &rect, white_width, screen_width, line_height,     full_height);
+                        self.piano_roll_notes          (&painter, &rect, white_width,               line_height                 );
+                        self.piano_roll_seek_bar       (&painter, &rect, white_width, full_height,  self.sample_rate            );
+                        self.piano_roll_white_key_block(&painter, &rect, white_width, full_height,  line_height                 );
+                        self.piano_roll_black_keys     (&painter, &rect, black_width, black_height, line_height                 );
+                    });
             });
     }
 
@@ -128,9 +183,8 @@ impl State {
         );
 
         {
-            let     width_per_second = 64.0;
-            let mut x                = rect.min.x + white_width;
-            let mut i                = 0;
+            let mut x = rect.min.x + white_width;
+            let mut i = 0;
 
             while x <= screen_width {
                 painter.vline(
@@ -142,7 +196,7 @@ impl State {
                     )
                 );
 
-                x += width_per_second * 0.25;
+                x += WIDTH_PER_SECOND * 0.25;
                 i += 1;
             }
         }
@@ -174,6 +228,28 @@ impl State {
         }
     }
 
+    fn piano_roll_notes(
+        &self,
+        painter:     &Painter,
+        rect:        &Rect,
+        white_width: f32,
+        line_height: f32
+    ) {
+        for note in self.notes.iter() {
+            let x = rect.min.x + white_width + note.start * WIDTH_PER_SECOND;
+            let y = rect.min.y + line_height * note.key;
+            let w = note.length * WIDTH_PER_SECOND;
+
+            painter.rect(
+                Rect::from_min_size(pos2(x, y), vec2(w, line_height)),
+                line_height * 0.25,
+                self.theme.piano_roll.note,
+                Stroke::new(1.0f32, self.theme.piano_roll.outline),
+                StrokeKind::Inside
+            );
+        }
+    }
+
     fn piano_roll_seek_bar(
         &self,
         painter:     &Painter,
@@ -182,9 +258,8 @@ impl State {
         full_height: f32,
         sample_rate: f32
     ) {
-        let time             = CLOCK.load(Ordering::Relaxed) as f32 / sample_rate;
-        let width_per_second = 64.0;
-        let x                = time * width_per_second;
+        let time = CLOCK.load(Ordering::Relaxed) as f32 / sample_rate;
+        let x    = time * WIDTH_PER_SECOND;
 
         painter.vline(
             rect.min.x + white_width + x,
@@ -306,11 +381,16 @@ impl State {
     }
 }
 
-pub fn run(stream: Stream, audio_producer: Producer<UiCommand>, sample_rate: f32) {
+pub fn run(
+    stream:             Stream,
+    audio_producer:     Producer<    audio::UiCommand>,
+    scheduler_producer: Producer<scheduler::UiCommand>,
+    sample_rate:        f32
+) {
     let title   = std::env!("CARGO_BIN_NAME");
-    let options = eframe::NativeOptions::default();
+    let options = NativeOptions::default();
 
-    let state   = State::new(audio_producer, sample_rate);
+    let state   = State::new(audio_producer, scheduler_producer, sample_rate);
 
     stream.play().unwrap();
     eframe::run_ui_native(title, options, state.callback()).unwrap();
